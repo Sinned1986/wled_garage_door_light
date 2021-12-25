@@ -1,7 +1,10 @@
+import threading
+
 import RPi.GPIO
 import signal
 import paho.mqtt.publish as publish
 import sys
+from  functools import partial
 
 request_exit_poll_reed_relay = 0
 
@@ -14,7 +17,7 @@ def sigint_handler(signal_received, frame):
 def send_value(name, value, auth):
 
     publish.single(
-        topic='reed_relay_switch/' + str(name) + '/value',
+        topic='garage/door_switch/' + str(name) + '/value',
         payload=str(value),
         auth=auth,
         hostname='kellerverwaltung',
@@ -22,26 +25,21 @@ def send_value(name, value, auth):
     )
 
 
-#mqtt setup
-auth = {
-    'username': 'client2',
-    'password': 'client2'
-}
+class ValueCache:
+    def __init__(self):
+        self.mutex = threading.Lock()
+        self.values = {}
 
 
-def top_switch(channel):
-    global auth
-    print('top')
-    val = RPi.GPIO.input(channel)
-    send_value(0, val, auth)
-
-
-def bottom_switch(channel):
-    global auth
-    print('bottom')
-    val = RPi.GPIO.input(channel)
-    send_value(1, val, auth)
-
+def triggered_switch(auth, value_cache, channel):
+    value_cache.mutex.aquire()
+    print(channel)
+    new_val = RPi.GPIO.input(channel)
+    if value_cache.values[channel] != new_val:
+        value_cache.values[channel] = new_val
+        send_value(channel, new_val, auth)
+        concurrent.futures.Future()
+    value_cache.mutex.release()
 
 def signal_handler(sig, frame):
     RPi.GPIO.cleanup()
@@ -53,22 +51,37 @@ if __name__ == '__main__':
     # general setup
     #signal(SIGINT, sigint_handler)
 
+    # mqtt setup
+    auth = {
+        'username': 'client2',
+        'password': 'client2'
+    }
+
+    value_cache = ValueCache()
+
     # gpio setup
     gpio_0 = 11
     gpio_1 = 13
     RPi.GPIO.setmode(RPi.GPIO.BOARD)
     RPi.GPIO.setup(gpio_0, RPi.GPIO.IN, pull_up_down=RPi.GPIO.PUD_UP)
     RPi.GPIO.setup(gpio_1, RPi.GPIO.IN, pull_up_down=RPi.GPIO.PUD_UP)
-    
-    RPi.GPIO.add_event_detect(gpio_0, RPi.GPIO.BOTH, callback=top_switch, bouncetime=100)
-    RPi.GPIO.add_event_detect(gpio_1, RPi.GPIO.BOTH, callback=bottom_switch, bouncetime=100)
-        
 
-    val_old = [RPi.GPIO.input(gpio_0), RPi.GPIO.input(gpio_1)]    
+    f_isr = partial(triggered_switch(auth=auth, value_cache=value_cache))
+
+    RPi.GPIO.add_event_detect(gpio_0, RPi.GPIO.BOTH, callback=partial(f_isr(channel=0)), bouncetime=100)
+    RPi.GPIO.add_event_detect(gpio_1, RPi.GPIO.BOTH, callback=partial(f_isr(channel=1)), bouncetime=100)
+
+    val_old = [RPi.GPIO.input(gpio_0), RPi.GPIO.input(gpio_1)]
+
     # publish initial values
+    value_cache.mutex.acquire()
+    value_cache.values[0] = val_old[0]
+    value_cache.values[1] = val_old[1]
     send_value(0, val_old[0], auth)
     send_value(1, val_old[1], auth)
-    
+    value_cache.mutex.release()
+
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.pause()
 
