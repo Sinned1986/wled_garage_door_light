@@ -4,7 +4,8 @@ import RPi.GPIO
 import signal
 import paho.mqtt.publish as publish
 import sys
-from  functools import partial
+from functools import partial
+import asyncio
 
 request_exit_poll_reed_relay = 0
 
@@ -31,23 +32,28 @@ class ValueCache:
         self.values = {}
 
 
-def triggered_switch(auth, value_cache, channel):
+async def check_switch_again(bounce_time, auth, value_cache, channel):
+    await asyncio.sleep(bounce_time)
+    triggered_switch(bounce_time, auth, value_cache, channel)
+
+
+def triggered_switch(bounce_time, auth, value_cache, channel):
     value_cache.mutex.aquire()
     print(channel)
     new_val = RPi.GPIO.input(channel)
     if value_cache.values[channel] != new_val:
         value_cache.values[channel] = new_val
         send_value(channel, new_val, auth)
-        concurrent.futures.Future()
+        asyncio.ensure_future(check_switch_again(bounce_time, auth, value_cache, channel))  # fire and forget
     value_cache.mutex.release()
+
 
 def signal_handler(sig, frame):
     RPi.GPIO.cleanup()
     sys.exit(0)
 
 
-if __name__ == '__main__':
-    
+def main():
     # general setup
     #signal(SIGINT, sigint_handler)
 
@@ -66,10 +72,12 @@ if __name__ == '__main__':
     RPi.GPIO.setup(gpio_0, RPi.GPIO.IN, pull_up_down=RPi.GPIO.PUD_UP)
     RPi.GPIO.setup(gpio_1, RPi.GPIO.IN, pull_up_down=RPi.GPIO.PUD_UP)
 
-    f_isr = partial(triggered_switch(auth=auth, value_cache=value_cache))
-
-    RPi.GPIO.add_event_detect(gpio_0, RPi.GPIO.BOTH, callback=partial(f_isr(channel=0)), bouncetime=100)
-    RPi.GPIO.add_event_detect(gpio_1, RPi.GPIO.BOTH, callback=partial(f_isr(channel=1)), bouncetime=100)
+    bouncetime = 0.050 # 50 ms in s
+    f_isr = partial(triggered_switch, bouncetime*1.1, auth, value_cache) # increase delay to be sure to miss no transition
+    f0 = partial(triggered_switch, bouncetime, auth, value_cache, 0)
+    f1 = partial(triggered_switch, bouncetime, auth, value_cache, 1)
+    RPi.GPIO.add_event_detect(gpio_0, RPi.GPIO.BOTH, callback=f0, bouncetime=int(bouncetime*1000))
+    RPi.GPIO.add_event_detect(gpio_1, RPi.GPIO.BOTH, callback=f1, bouncetime=int(bouncetime*1000))
 
     val_old = [RPi.GPIO.input(gpio_0), RPi.GPIO.input(gpio_1)]
 
@@ -96,3 +104,12 @@ if __name__ == '__main__':
     #        send_value(1, val_old[1], auth)
     #    if request_exit_poll_reed_relay == 1:
     #        exit(0)
+
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+
+    pending = asyncio.Task.all_tasks()
+    loop.run_until_complete(asyncio.gather(*pending))
+

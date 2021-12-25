@@ -11,7 +11,7 @@ switch1 = 1
 def on_connect(client, userdata, flags, rc):
     print('connected with result code ' + str(rc))
 
-    client.subscribe('wled/c49bb0/#')
+    client.subscribe('wled/c656f8/#')
     client.subscribe('wled/all/#')
     client.subscribe('reed_relay_switch/#')
 
@@ -22,24 +22,24 @@ def on_message(client, userdate, msg):
     updateWLED = 0
 
     payload = str(msg.payload)
-    if msg.topic == 'wled/c49bb0/v':
-        payload_xml  = xml.dom.minidom.parseString(msg.payload)
+    if msg.topic == 'wled/c656f8/v':
+        payload_xml = xml.dom.minidom.parseString(msg.payload)
         
         payload_dict = xmltodict.parse(msg.payload)
-        payload = payload_xml.toprettyxml() + json.dumps(payload_dict, indent = 2)
+        payload = payload_xml.toprettyxml() + json.dumps(payload_dict, indent=2)
 
     if msg.topic == 'reed_relay_switch/0/value':
-        if (switch0 != int(msg.payload)):
+        if switch0 != int(msg.payload):
             updateWLED = 1
             switch0 = int(msg.payload)
     if msg.topic == 'reed_relay_switch/1/value':
-        if (switch1 != int(msg.payload)):
+        if switch1 != int(msg.payload):
             updateWLED = 1
             switch1 = int(msg.payload)
 
     auth = {
-        'username' : 'client1',
-        'password' : 'client1'
+        'username': 'client1',
+        'password': 'client1'
     }
 
     if updateWLED == 1:
