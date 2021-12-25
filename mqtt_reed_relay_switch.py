@@ -7,12 +7,14 @@ import json
 switch0 = 1
 switch1 = 1
 
+
 def on_connect(client, userdata, flags, rc):
     print('connected with result code ' + str(rc))
 
     client.subscribe('wled/c49bb0/#')
     client.subscribe('wled/all/#')
     client.subscribe('reed_relay_switch/#')
+
 
 def on_message(client, userdate, msg):
     global switch0
