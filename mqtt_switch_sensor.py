@@ -18,7 +18,7 @@ def sigint_handler(signal_received, frame):
 def send_value(name, value, auth):
 
     publish.single(
-        topic='garage/door_switch/' + str(name) + '/value',
+        topic=''.join(['garage/door_switch/', name, '/value']),
         payload=str(value),
         auth=auth,
         hostname='kellerverwaltung',
@@ -32,19 +32,19 @@ class ValueCache:
         self.values = {}
 
 
-async def check_switch_again(bounce_time, auth, value_cache, channel):
+async def check_switch_again(channel_names, asyncio_loop, bounce_time, auth, value_cache, channel):
     await asyncio.sleep(bounce_time)
-    triggered_switch(bounce_time, auth, value_cache, channel)
+    triggered_switch(channel_names, asyncio_loop, bounce_time, auth, value_cache, channel)
 
 
-def triggered_switch(bounce_time, auth, value_cache, channel):
-    value_cache.mutex.aquire()
+def triggered_switch(channel_names, asyncio_loop, bounce_time, auth, value_cache, channel):
+    value_cache.mutex.acquire()
     print(channel)
     new_val = RPi.GPIO.input(channel)
     if value_cache.values[channel] != new_val:
         value_cache.values[channel] = new_val
-        send_value(channel, new_val, auth)
-        asyncio.ensure_future(check_switch_again(bounce_time, auth, value_cache, channel))  # fire and forget
+        send_value(channel_names[channel], new_val, auth)
+        asyncio.ensure_future(check_switch_again(channel_names, asyncio_loop, bounce_time, auth, value_cache, channel), loop=asyncio_loop)  # fire and forget
     value_cache.mutex.release()
 
 
@@ -53,7 +53,7 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
-def main():
+def main(asyncio_loop):
     # general setup
     #signal(SIGINT, sigint_handler)
 
@@ -68,25 +68,27 @@ def main():
     # gpio setup
     gpio_0 = 11
     gpio_1 = 13
+    channel_names = {
+        gpio_0: 'top',
+        gpio_1: 'bottom',
+    }
     RPi.GPIO.setmode(RPi.GPIO.BOARD)
     RPi.GPIO.setup(gpio_0, RPi.GPIO.IN, pull_up_down=RPi.GPIO.PUD_UP)
     RPi.GPIO.setup(gpio_1, RPi.GPIO.IN, pull_up_down=RPi.GPIO.PUD_UP)
 
     bouncetime = 0.050 # 50 ms in s
-    f_isr = partial(triggered_switch, bouncetime*1.1, auth, value_cache) # increase delay to be sure to miss no transition
-    f0 = partial(triggered_switch, bouncetime, auth, value_cache, 0)
-    f1 = partial(triggered_switch, bouncetime, auth, value_cache, 1)
-    RPi.GPIO.add_event_detect(gpio_0, RPi.GPIO.BOTH, callback=f0, bouncetime=int(bouncetime*1000))
-    RPi.GPIO.add_event_detect(gpio_1, RPi.GPIO.BOTH, callback=f1, bouncetime=int(bouncetime*1000))
+    f = partial(triggered_switch, channel_names, asyncio_loop, bouncetime, auth, value_cache)
+    RPi.GPIO.add_event_detect(gpio_0, RPi.GPIO.BOTH, callback=f, bouncetime=int(bouncetime*1000))
+    RPi.GPIO.add_event_detect(gpio_1, RPi.GPIO.BOTH, callback=f, bouncetime=int(bouncetime*1000))
 
     val_old = [RPi.GPIO.input(gpio_0), RPi.GPIO.input(gpio_1)]
 
     # publish initial values
     value_cache.mutex.acquire()
-    value_cache.values[0] = val_old[0]
-    value_cache.values[1] = val_old[1]
-    send_value(0, val_old[0], auth)
-    send_value(1, val_old[1], auth)
+    value_cache.values[gpio_0] = val_old[0]
+    value_cache.values[gpio_1] = val_old[1]
+    send_value(channel_names[gpio_0], val_old[0], auth)
+    send_value(channel_names[gpio_1], val_old[1], auth)
     value_cache.mutex.release()
 
 
@@ -108,7 +110,7 @@ def main():
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    loop.run_until_complete(main(loop))
 
     pending = asyncio.Task.all_tasks()
     loop.run_until_complete(asyncio.gather(*pending))

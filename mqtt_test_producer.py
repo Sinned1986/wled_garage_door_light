@@ -30,20 +30,24 @@ class Controller:
 if __name__ == '__main__':
 
     controller = Controller()
-    light_modes = [
-        ['off', 1],
-        ['white', 2.25],
-        ['off', 0.75],
-        ['spot', 5],
-        ['off', 0.75],
-        ['red', 8],
-        ['off', 0.75],
-        ['green', 5],
-        ['white', 2.25],
-        ['off', 0.75],
-        ['spot', 2],
-        ['dim', 0],
-    ]
+    if False:
+        light_modes = [
+            ['off', 1],
+            ['white', 2.25],
+            ['off', 0.75],
+            ['spot', 5],
+            ['off', 0.75],
+            ['red', 8],
+            ['off', 0.75],
+            ['green', 5],
+            ['white', 2.25],
+            ['off', 0.75],
+            ['spot', 2],
+            ['dim', 0],
+        ]
+    else:
+        light_modes = [['red', 1]]
+
     for light_mode, duration in light_modes:
         print('send %s' % light_mode)
         controller.send(wled_config.wled_pattern_json[light_mode])

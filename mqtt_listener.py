@@ -5,8 +5,7 @@ import xml.dom.minidom
 def on_connect(client, userdata, flags, rc):
     print('connected with result code ' + str(rc))
 
-    client.subscribe('kellerverwaltung/test')
-    client.subscribe('kellervweraltung/topic')
+    client.subscribe('garage/door_switch/#')
     client.subscribe('wled/c656f8/#')
     client.subscribe('wled/all/#')
 
