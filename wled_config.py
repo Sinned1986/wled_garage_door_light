@@ -22,7 +22,8 @@ wled_pattern_json = {
                 'bri': 255,
                 'fx': 60,  # effect fx
                 'sx': 203,  # fx speed
-                'ix': 246
+                'ix': 246,
+                'transition': 5,
             }
         ]
     },
@@ -44,12 +45,22 @@ wled_pattern_json = {
                 'on': True,
                 'bri': 255,
                 'fx': 0,  # effect fx
-                'ix': 255
+                'ix': 255,
+                'transition': 5,
             }
         ]
     },
     'off': {
-        'on': False,
+        'on': True,
+        'seg': [
+            {
+                'id': 0,
+                'on': False,
+                'transition': 5,
+            }
+        ]
+
+
     },
     'white': {
         'on': True,
@@ -63,14 +74,15 @@ wled_pattern_json = {
                 'spc': 0,
                 'col': [
                     [255, 255, 255],
-                    [0, 0, 0],
+                    [255, 255, 255],
                     [0, 0, 0],
                 ],
                 'on': True,
                 'bri': 255,
                 'fx': 60,  # effect fx
                 'sx': 64,  # fx speed
-                'ix': 113
+                'ix': 113,
+                'transition': 5,
             }
         ]
     },
@@ -91,7 +103,8 @@ wled_pattern_json = {
                 ],
                 'on': True,
                 'bri': 255,
-                'fx': 0
+                'fx': 0,
+                'transition': 5,
             },
         ]
     },
@@ -103,6 +116,7 @@ wled_pattern_json = {
                 'id': 0,
                 'on': True,
                 'bri': 32,
+                'transition': 5,
             },
         ]
     }

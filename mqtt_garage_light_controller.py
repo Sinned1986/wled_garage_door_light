@@ -1,15 +1,11 @@
-import asyncio
 import threading
 import time
-
 import paho.mqtt.client as mqtt
-import paho.mqtt.publish as publish
 import xml.dom.minidom
 import xmltodict
 import json
 import wled_config
-from functools import partial
-
+import signal
 
 def _on_connect(client, userdata, flags, rc):
     print('connected with result code ' + str(rc))
@@ -166,6 +162,8 @@ class GarageLightController:
         #print(msg.topic + ' ' + payload)
 
     def _run_sequence(self, name):
+        self._cmd_queue.clear()
+        print(''.join(['sequence ', name]))
         if name == 'close':
             self._cmd_queue.queue([0.75, json.dumps(wled_config.wled_pattern_json['off'])])
             self._cmd_queue.queue([5, json.dumps(wled_config.wled_pattern_json['green'])])
@@ -186,12 +184,23 @@ class GarageLightController:
             raise Exception('unknown sequence')
 
 
-if __name__ == '__main__':
-    auth = {
-        'username': 'client1',
-        'password': 'client1'
-    }
-    controller = GarageLightController()
+class QuitGarageLightController:
 
-    while True:
-        time.sleep(10)
+    def __init__(self):
+        self._event = threading.Event()
+        signal.signal(signal.SIGINT, self._event.set())
+        signal.signal(signal.SIGTERM, self._event.set())
+
+    def is_set(self):
+        return self._event.is_set()
+
+    def wait(self):
+        return self._event.wait()
+
+
+if __name__ == '__main__':
+
+    controller = GarageLightController()
+    quit_controller = QuitGarageLightController()
+    while not quit_controller.is_set():
+        quit_controller.wait()
