@@ -1,3 +1,5 @@
+import time
+
 import paho.mqtt.client as mqtt
 import xml.dom.minidom
 
@@ -15,8 +17,8 @@ def on_message(client, userdate, msg):
     if msg.topic == 'wled/c656f8/v':
         xml_payload = xml.dom.minidom.parseString(msg.payload)
         payload = xml_payload.toprettyxml()
-        
-    print(msg.topic + ' ' + payload)
+
+    print(''.join([str(time.time()), ' ', msg.topic, ' ', payload]))
 
 
 if __name__ == '__main__':

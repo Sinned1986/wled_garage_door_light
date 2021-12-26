@@ -21,6 +21,7 @@ def send_value(name, value, auth):
         topic=''.join(['garage/door_switch/', name, '/value']),
         payload=str(value),
         auth=auth,
+        retain=True,
         hostname='kellerverwaltung',
         port=9001
     )

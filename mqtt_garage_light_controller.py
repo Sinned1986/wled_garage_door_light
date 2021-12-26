@@ -1,3 +1,5 @@
+import asyncio
+import threading
 import time
 
 import paho.mqtt.client as mqtt
@@ -17,35 +19,127 @@ def _on_connect(client, userdata, flags, rc):
     client.subscribe('garage/door_switch/#')
 
 
+class CmdQueueSyncException(Exception):
+    pass
+
+
+# we need a threadsafe clearable queue for led commands, insert tuple of [duration in ms as int, json-string]
+class CmdQueue:
+    def __init__(self):
+        self.cmd_queue = []
+        self.cmd_queue_mutex = threading.Lock()
+        self.cmd_event = threading.Event()
+
+    def queue(self, value):
+        self.cmd_queue_mutex.acquire()
+        try:
+            self.cmd_queue.append(value)
+            self.cmd_event.set()
+        finally:
+            self.cmd_queue_mutex.release()
+
+    def dequeue(self):
+        while not self.cmd_event.is_set():
+            self.cmd_event.wait()
+        self.cmd_queue_mutex.acquire()
+        try:
+            size = len(self.cmd_queue)
+            if size == 0:
+                raise CmdQueueSyncException()
+            if size == 1:
+                self.cmd_event.clear()
+            return self.cmd_queue.pop(0)
+        finally:
+            self.cmd_queue_mutex.release()
+
+    def clear(self):
+        self.cmd_queue_mutex.acquire()
+        try:
+            self.cmd_queue.clear()
+            self.cmd_event.clear()
+        finally:
+            self.cmd_queue_mutex.release()
+
+    def unblock(self):
+        self.clear()
+        self.cmd_event.set()
+
+
 class GarageLightController:
     switch0 = 1
     switch1 = 1
 
-    def __init__(self, mqtt_auth):
-        self._auth = mqtt_auth
+    def __init__(self):
+        print('INIT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        self._cmd_queue = CmdQueue()
 
-        client = mqtt.Client()
-        client.on_connect = _on_connect
-        client.on_message = self._on_message
+        mqtt_clients = []
+        mqtt_client_loops = []
 
-        client.username_pw_set('client1', 'client1')
-        client.connect('kellerverwaltung', 9001, 60)
-        self._client = client
+        for i in range(2):
+            client_name = ''.join(['garage_light_controller_', str(i)])
+            client = mqtt.Client(client_name)
+            client.username_pw_set(client_name, 'PrSt3hRscoMaA5Y8')
+            mqtt_clients.append(client)
+
+        # mqtt client to subscribe the door sensors
+        mqtt_clients[0].on_connect = _on_connect
+        mqtt_clients[0].on_message = self._on_message
+        self._client_listener = mqtt_clients[0]
+        # mqtt client to send cmds to the led controller
+        self._client_sender = mqtt_clients[1]
+
+        for client in mqtt_clients:
+            client.connect('kellerverwaltung', 9001, 60)
+            mqtt_client_loop = threading.Thread(target=client.loop_forever)
+            mqtt_client_loop.start()
+            mqtt_client_loops.append(mqtt_client_loop)
+
+        self._mqtt_clients = mqtt_clients
+        self._mqtt_client_loops = mqtt_client_loops
+        # init internal cache for door sensors
         self._switches = {
             'top': -1,
             'bottom': -1,
         }
+
+        # start the thread which will send cmds to the led controller
+        self._run_shutdown_event = threading.Event()
+        self._run_interrupt_event = threading.Event()
         self._run_sequence('init')
+        self._run = threading.Thread(target=self._sender_thread)
+        self._run.start()
+
+    def __del__(self):
+        self._run_shutdown_event.set()
+        self._cmd_queue.unblock()
+        self._run.join()
+
+        for client in self._mqtt_clients:
+            client.disconnect()
+        for client_loop in self._mqtt_client_loops:
+            client_loop.join()
 
     def _send(self, payload):
-        self._client.publish(
+        self._client_sender.publish(
             topic='wled/all/api',
             payload=payload
         )
 
+    def _sender_thread(self):
+        while not self._run_shutdown_event.is_set():
+            try:
+                queue_entry = self._cmd_queue.dequeue()
+                duration = queue_entry[0]
+                json_str = queue_entry[1]
+                self._send(json_str)
+                _ = self._run_interrupt_event.wait(timeout=duration)  # we don't care if the timeout or the event occured
+                self._run_interrupt_event.clear()
+            except CmdQueueSyncException:
+                pass
+
     def _on_message(self, client, userdata, msg):
         updateWLED = 0
-
         payload = str(msg.payload)
         if msg.topic == 'wled/c656f8/v':
             payload_xml = xml.dom.minidom.parseString(msg.payload)
@@ -73,37 +167,23 @@ class GarageLightController:
 
     def _run_sequence(self, name):
         if name == 'close':
-            self._send(json.dumps(wled_config.wled_pattern_json['off']))
-            time.sleep(0.75)
-            self._send(json.dumps(wled_config.wled_pattern_json['green']))
-            time.sleep(5)
-            self._send(json.dumps(wled_config.wled_pattern_json['white']))
-            time.sleep(2.25)
-            self._send(json.dumps(wled_config.wled_pattern_json['off']))
-            time.sleep(0.75)
-            self._send(json.dumps(wled_config.wled_pattern_json['spot']))
-            time.sleep(2)
-            self._send(json.dumps(wled_config.wled_pattern_json['dim']))
+            self._cmd_queue.queue([0.75, json.dumps(wled_config.wled_pattern_json['off'])])
+            self._cmd_queue.queue([5, json.dumps(wled_config.wled_pattern_json['green'])])
+            self._cmd_queue.queue([2.250, json.dumps(wled_config.wled_pattern_json['white'])])
+            self._cmd_queue.queue([0.75, json.dumps(wled_config.wled_pattern_json['off'])])
+            self._cmd_queue.queue([2, json.dumps(wled_config.wled_pattern_json['spot'])])
+            self._cmd_queue.queue([0, json.dumps(wled_config.wled_pattern_json['dim'])])
         elif name == 'open':
-            self._send(json.dumps(wled_config.wled_pattern_json['off']))
-            time.sleep(0.75)
-            self._send(json.dumps(wled_config.wled_pattern_json['red']))
-            time.sleep(0.75)
+            self._cmd_queue.queue([0.75, json.dumps(wled_config.wled_pattern_json['off'])])
+            self._cmd_queue.queue([0.75, json.dumps(wled_config.wled_pattern_json['red'])])
         elif name == 'init':
-            self._send(json.dumps(wled_config.wled_pattern_json['off']))
-            time.sleep(0.75)
-            self._send(json.dumps(wled_config.wled_pattern_json['white']))
-            time.sleep(2.25)
-            self._send(json.dumps(wled_config.wled_pattern_json['off']))
-            time.sleep(0.75)
-            self._send(json.dumps(wled_config.wled_pattern_json['spot']))
-            time.sleep(2)
-            self._send(json.dumps(wled_config.wled_pattern_json['dim']))
+            self._cmd_queue.queue([0.75, json.dumps(wled_config.wled_pattern_json['off'])])
+            self._cmd_queue.queue([2.250, json.dumps(wled_config.wled_pattern_json['white'])])
+            self._cmd_queue.queue([0.75, json.dumps(wled_config.wled_pattern_json['off'])])
+            self._cmd_queue.queue([2, json.dumps(wled_config.wled_pattern_json['spot'])])
+            self._cmd_queue.queue([0, json.dumps(wled_config.wled_pattern_json['dim'])])
         else:
             raise Exception('unknown sequence')
-
-    def loop_forever(self):
-        self._client.loop_forever()
 
 
 if __name__ == '__main__':
@@ -111,5 +191,7 @@ if __name__ == '__main__':
         'username': 'client1',
         'password': 'client1'
     }
-    controller = GarageLightController(auth)
-    controller.loop_forever()
+    controller = GarageLightController()
+
+    while True:
+        time.sleep(10)
