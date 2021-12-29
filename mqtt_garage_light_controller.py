@@ -66,16 +66,17 @@ class GarageLightController:
     switch1 = 1
 
     def __init__(self):
-        print('INIT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
         self._cmd_queue = CmdQueue()
 
         mqtt_clients = []
         mqtt_client_loops = []
+        with open('config.json') as file:
+            config = json.load(file)
 
         for i in range(2):
-            client_name = ''.join(['garage_light_controller_', str(i)])
+            client_name = ''.join(['garage_door_light_controller_', str(i)])
             client = mqtt.Client(client_name)
-            client.username_pw_set(client_name, 'PrSt3hRscoMaA5Y8')
+            client.username_pw_set(client_name, config['client'][client_name])
             mqtt_clients.append(client)
 
         # mqtt client to subscribe the door sensors
@@ -86,7 +87,7 @@ class GarageLightController:
         self._client_sender = mqtt_clients[1]
 
         for client in mqtt_clients:
-            client.connect('kellerverwaltung', 9001, 60)
+            client.connect('localhost', 1883, 60)
             mqtt_client_loop = threading.Thread(target=client.loop_forever)
             mqtt_client_loop.start()
             mqtt_client_loops.append(mqtt_client_loop)
@@ -188,8 +189,18 @@ class QuitGarageLightController:
 
     def __init__(self):
         self._event = threading.Event()
-        signal.signal(signal.SIGINT, self._event.set())
-        signal.signal(signal.SIGTERM, self._event.set())
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+
+    def __del__(self):
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+    def signal_handler(self, signum, frame):
+        if signum == signal.SIGINT:
+            self._event.set()
+        if signum == signal.SIGTERM:
+            self._event.set()
 
     def is_set(self):
         return self._event.is_set()

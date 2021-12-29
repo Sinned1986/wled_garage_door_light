@@ -1,3 +1,4 @@
+import json
 import threading
 
 import RPi.GPIO
@@ -22,8 +23,8 @@ def send_value(name, value, auth):
         payload=str(value),
         auth=auth,
         retain=True,
-        hostname='kellerverwaltung',
-        port=9001
+        hostname='localhost',
+        port=1883
     )
 
 
@@ -58,10 +59,13 @@ def main(asyncio_loop):
     # general setup
     #signal(SIGINT, sigint_handler)
 
+    with open('config.json') as file:
+        config = json.load(file)
+
     # mqtt setup
     auth = {
-        'username': 'client2',
-        'password': 'client2'
+        'username': 'garage_door_switches',
+        'password': config['client']['garage_door_switches']
     }
 
     value_cache = ValueCache()

@@ -1,0 +1,9 @@
+{
+  "host": "localhost",
+  "port": 1883,
+  "client": {
+    "garage_door_light_controller_0": "EXAMPLE",
+    "garage_door_light_controller_1": "EXAMPLE",
+    "garage_door_switches": "EXAMPLE"
+  }
+}
